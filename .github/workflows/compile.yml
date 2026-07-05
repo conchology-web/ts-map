@@ -4,7 +4,7 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest # 提供全套的旧版 MSBuild 和 Visual Studio 2022 编译环境
+    runs-on: windows-latest
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -16,41 +16,29 @@ jobs:
       uses: nuget/setup-nuget@v1
 
     - name: Legacy Hotfix - Inject Newtonsoft.Json and Disable Strict Warnings
-      # 【正面破局】：
-      # 我们完全放弃 dotnet add 命令。
-      # 直接使用 PowerShell 将老旧的 <Reference> XML 节点强行写进两个项目的 .csproj 文件中。
-      # 同时干掉会导致现代编译器报错中止的 TreatWarningsAsErrors 和 PostBuildEvent。
       run: |
         $JsonXml = '<Reference Include="Newtonsoft.Json"><HintPath>..\packages\Newtonsoft.Json.13.0.3\lib\net45\Newtonsoft.Json.dll</HintPath></Reference>'
-        
-        # 往核心 TsMap 项目注入 Newtonsoft.Json 引用
         (Get-Content TsMap/TsMap.csproj) -replace '<ItemGroup>', "<ItemGroup>`n    $JsonXml" | Set-Content TsMap/TsMap.csproj
-        # 往 UI Canvas 项目注入 Newtonsoft.Json 引用
         (Get-Content TsMap.Canvas/TsMap.Canvas.csproj) -replace '<ItemGroup>', "<ItemGroup>`n    $JsonXml" | Set-Content TsMap.Canvas/TsMap.Canvas.csproj
-        
-        # 关闭严格的警告转错误策略（防止现代编译器对老代码吹毛求疵）
         (Get-Content TsMap/TsMap.csproj) -replace '<TreatWarningsAsErrors>true</TreatWarningsAsErrors>', '<TreatWarningsAsErrors>false</TreatWarningsAsErrors>' | Set-Content TsMap/TsMap.csproj
         (Get-Content TsMap.Canvas/TsMap.Canvas.csproj) -replace '<TreatWarningsAsErrors>true</TreatWarningsAsErrors>', '<TreatWarningsAsErrors>false</TreatWarningsAsErrors>' | Set-Content TsMap.Canvas/TsMap.Canvas.csproj
-        
-        # 强行删除原作者在项目文件里写死的、会导致绝对路径报错的复制 C++ 库事件
         (Get-Content TsMap.Canvas/TsMap.Canvas.csproj) -replace '<PostBuildEvent>.*?</PostBuildEvent>', '' | Set-Content TsMap.Canvas/TsMap.Canvas.csproj
 
     - name: Install Newtonsoft.Json Package
-      # 使用正统的旧版 nuget 命令，下载包并解压到本地的 packages 文件夹中
       run: nuget install Newtonsoft.Json -Version 13.0.3 -OutputDirectory packages
         
     - name: Legacy Nuget Restore
-      # 为整个旧解决方案执行依赖补全
       run: nuget restore TsMap.sln
       
     - name: Build with Visual Studio MSBuild
-      # 调用真正的 Visual Studio 编译器后端（MSBuild）强行编译为 Release 版本
-      run: msbuild TsMap.sln /p:Configuration=Release /p:Platform="Any CPU" /v:m
+      # 【核心正面解决】：
+      # 抹除死板的 /p:Platform 传参，不强制指定 Any CPU，让 MSBuild 顺着 .sln 内部的默认第一配置直接编译。
+      run: msbuild TsMap.sln /v:m
 
     - name: Upload Compiled Binaries
       uses: actions/upload-artifact@v4
       with:
         name: TsMap-Legacy-Success-Binaries
+        # 扩大抓取范围，无论是 bin/Debug、bin/Release 还是 x64，只要生成了编译产物，全部打包发回。
         path: |
-          **/bin/Release/
-          **/bin/x64/Release/
+          **/bin/
