@@ -24,22 +24,49 @@ jobs:
     - name: Install Newtonsoft.Json Package
       run: nuget install Newtonsoft.Json -Version 13.0.3 -OutputDirectory packages
 
-    - name: Legacy Hotfix - Clean Inject Reference
+    - name: Legacy Hotfix - Clean Inject Reference (C# Native Engine)
+      # 【核心正面修复】：
+      # 彻底放弃脆弱的 PowerShell 动态 XML 变换。
+      # 我们直接用 Windows 自带的 C# 编译器（csc）现场编译一个专门重写旧项目文件的稳健小工具。
+      # 这样可以 100% 确保底层 XML 节点的类型强安全，绝对不会再报方法找不到的错误。
       shell: powershell
       run: |
-        $projects = @("TsMap/TsMap.csproj", "TsMap.Canvas/TsMap.Canvas.csproj")
-        foreach ($path in $projects) {
-            [xml]$xml = Get-Content $path
-            $itemGroup = $xml.Project.ItemGroup
-            $reference = $xml.CreateElement("Reference", $xml.Project.NamespaceURI)
-            $reference.SetAttribute("Include", "Newtonsoft.Json")
-            $hintPath = $xml.CreateElement("HintPath", $xml.Project.NamespaceURI)
-            $hintPath.InnerText = "..\packages\Newtonsoft.Json.13.0.3\lib\net45\Newtonsoft.Json.dll"
-            [void]$reference.AppendChild($hintPath)
-            [void]$itemGroup.AppendChild($reference)
-            $xml.Save($path)
+        $csharpCode = @"
+        using System;
+        using System.Xml;
+        class Program {
+            static void Main() {
+                string[] projects = { "TsMap/TsMap.csproj", "TsMap.Canvas/TsMap.Canvas.csproj" };
+                foreach (var path in projects) {
+                    XmlDocument doc = new XmlDocument();
+                    doc.Load(path);
+                    XmlNamespaceManager nsmgr = new XmlNamespaceManager(doc.NameTable);
+                    nsmgr.AddNamespace("ns", doc.DocumentElement.NamespaceURI);
+                    
+                    // 精准定位到第一个包含 Reference 节点的 ItemGroup，或者创建一个新的
+                    XmlNode itemGroup = doc.SelectSingleNode("//ns:ItemGroup[ns:Reference]", nsmgr);
+                    if (itemGroup == null) {
+                        itemGroup = doc.SelectSingleNode("//ns:ItemGroup", nsmgr);
+                    }
+                    
+                    XmlElement reference = doc.CreateElement("Reference", doc.DocumentElement.NamespaceURI);
+                    reference.SetAttribute("Include", "Newtonsoft.Json");
+                    XmlElement hintPath = doc.CreateElement("HintPath", doc.DocumentElement.NamespaceURI);
+                    hintPath.InnerText = @"..\packages\Newtonsoft.Json.13.0.3\lib\net45\Newtonsoft.Json.dll";
+                    
+                    reference.AppendChild(hintPath);
+                    itemGroup.AppendChild(reference);
+                    doc.Save(path);
+                    Console.WriteLine("Successfully hotfixed: " + path);
+                }
+            }
         }
-        
+        "@
+        Set-Content -Path "HotfixEngine.cs" -Value $csharpCode
+        # 现场编译并执行该修复器
+        csc.exe HotfixEngine.cs
+        .\HotfixEngine.exe
+
     - name: Restore Project
       run: nuget restore TsMap.sln
       
@@ -47,7 +74,6 @@ jobs:
       run: msbuild TsMap.sln /v:m
 
     - name: Scan Generated Files
-      # 【核心正面修复】：使用标准的 PowerShell 命令来遍历并打印生成的 .exe 文件，绝对不会再报路径找不到的错误
       shell: powershell
       run: |
         Get-ChildItem -Path . -Filter *.exe -Recurse | Select-Object FullName
