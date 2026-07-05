@@ -1,4 +1,4 @@
-name: Legacy Framework Compile TsMap
+name: Ultimate Hotfix Compile TsMap
 on:
   workflow_dispatch: 
 
@@ -9,36 +9,38 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
       
-    - name: Setup MSBuild
+    - name: Setup .NET
       uses: microsoft/setup-msbuild@v2
-      
-    - name: Setup NuGet
-      uses: nuget/setup-nuget@v1
 
-    - name: Legacy Hotfix - Inject Newtonsoft.Json and Disable Strict Warnings
+    - name: Frontal Strike - Remove Broken PostBuildEvents
       run: |
-        $JsonXml = '<Reference Include="Newtonsoft.Json"><HintPath>..\packages\Newtonsoft.Json.13.0.3\lib\net45\Newtonsoft.Json.dll</HintPath></Reference>'
-        (Get-Content TsMap/TsMap.csproj) -replace '<ItemGroup>', "<ItemGroup>`n    $JsonXml" | Set-Content TsMap/TsMap.csproj
-        (Get-Content TsMap.Canvas/TsMap.Canvas.csproj) -replace '<ItemGroup>', "<ItemGroup>`n    $JsonXml" | Set-Content TsMap.Canvas/TsMap.Canvas.csproj
-        (Get-Content TsMap/TsMap.csproj) -replace '<TreatWarningsAsErrors>true</TreatWarningsAsErrors>', '<TreatWarningsAsErrors>false</TreatWarningsAsErrors>' | Set-Content TsMap/TsMap.csproj
-        (Get-Content TsMap.Canvas/TsMap.Canvas.csproj) -replace '<TreatWarningsAsErrors>true</TreatWarningsAsErrors>', '<TreatWarningsAsErrors>false</TreatWarningsAsErrors>' | Set-Content TsMap.Canvas/TsMap.Canvas.csproj
-        (Get-Content TsMap.Canvas/TsMap.Canvas.csproj) -replace '<PostBuildEvent>.*?</PostBuildEvent>', '' | Set-Content TsMap.Canvas/TsMap.Canvas.csproj
+        powershell -Command "(Get-Content TsMap.Canvas/TsMap.Canvas.csproj) -replace '<PostBuildEvent>.*?</PostBuildEvent>', '' | Set-Content TsMap.Canvas/TsMap.Canvas.csproj"
+        powershell -Command "(Get-Content TsMap/TsMap.csproj) -replace '<TreatWarningsAsErrors>true</TreatWarningsAsErrors>', '<TreatWarningsAsErrors>false</TreatWarningsAsErrors>' | Set-Content TsMap/TsMap.csproj"
+        powershell -Command "(Get-Content TsMap.Canvas/TsMap.Canvas.csproj) -replace '<TreatWarningsAsErrors>true</TreatWarningsAsErrors>', '<TreatWarningsAsErrors>false</TreatWarningsAsErrors>' | Set-Content TsMap.Canvas/TsMap.Canvas.csproj"
 
-    - name: Install Newtonsoft.Json Package
-      run: nuget install Newtonsoft.Json -Version 13.0.3 -OutputDirectory packages
+    - name: Inject Newtonsoft.Json
+      run: |
+        nuget install Newtonsoft.Json -Version 13.0.3 -OutputDirectory packages
+        powershell -Command "$JsonXml = '<Reference Include=\"Newtonsoft.Json\"><HintPath>..\packages\Newtonsoft.Json.13.0.3\lib\net45\Newtonsoft.Json.dll</HintPath></Reference>'; (Get-Content TsMap/TsMap.csproj) -replace '<ItemGroup>', \"<ItemGroup>`n    `$JsonXml\" | Set-Content TsMap/TsMap.csproj"
+        powershell -Command "$JsonXml = '<Reference Include=\"Newtonsoft.Json\"><HintPath>..\packages\Newtonsoft.Json.13.0.3\lib\net45\Newtonsoft.Json.dll</HintPath></Reference>'; (Get-Content TsMap.Canvas/TsMap.Canvas.csproj) -replace '<ItemGroup>', \"<ItemGroup>`n    `$JsonXml\" | Set-Content TsMap.Canvas/TsMap.Canvas.csproj"
         
-    - name: Legacy Nuget Restore
+    - name: Restore Project
       run: nuget restore TsMap.sln
       
     - name: Build with Visual Studio MSBuild
-      # 【核心正面解决】：
-      # 抹除死板的 /p:Platform 传参，不强制指定 Any CPU，让 MSBuild 顺着 .sln 内部的默认第一配置直接编译。
       run: msbuild TsMap.sln /v:m
 
-    - name: Upload Compiled Binaries
+    - name: Scan and Show Generated Files
+      # 【核心正面诊断】：在控制台强制递归打印当前目录下所有的 .exe 文件，让我们在日志里一眼能看到它被编译到了哪个角落！
+      run: |
+        dir /s *.exe
+
+    - name: Gather Final Executables
       uses: actions/upload-artifact@v4
       with:
-        name: TsMap-Legacy-Success-Binaries
-        # 扩大抓取范围，无论是 bin/Debug、bin/Release 还是 x64，只要生成了编译产物，全部打包发回。
+        name: TsMap-Hotfixed-Binaries
+        # 【核心破局】：不要指定任何具体文件夹。
+        # 只要在这个项目根目录下（.）被拉出来的、任何深度的所有 .exe 和 .dll，全部一网打尽打包！
         path: |
-          **/bin/
+          **/*.exe
+          **/*.dll
