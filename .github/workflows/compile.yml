@@ -1,27 +1,33 @@
 name: Online VS Compile TsMap
 on:
-  workflow_dispatch: # 允许你手动点击按钮触发编译
+  workflow_dispatch: 
 
 jobs:
   build:
-    runs-on: windows-latest # 租用一台微软官方的 Windows 线上虚拟机
+    runs-on: windows-latest
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4 # 把代码下载到虚拟机里
+      uses: actions/checkout@v4
       
     - name: Setup .NET
-      uses: actions/setup-dotnet@v4 # 在虚拟机里配置 VS 编译环境
+      uses: actions/setup-dotnet@v4
       with:
         dotnet-version: '8.0.x'
         
+    - name: Force Install Newtonsoft Json
+      # 【核心修复】：在编译前，强行用 NuGet 为 TsMap 核心项目安装缺少的 Newtonsoft.Json 库
+      run: |
+        dotnet add TsMap/TsMap.csproj package Newtonsoft.Json
+        dotnet add TsMap.Canvas/TsMap.Canvas.csproj package Newtonsoft.Json
+        
     - name: Restore dependencies
-      run: dotnet restore TsMap.sln # 自动下载项目缺少的库（如 Newtonsoft.Json）
+      run: dotnet restore TsMap.sln
       
     - name: Build Project
-      run: dotnet build TsMap.sln -c Release # 开始执行 VS 后台编译
+      run: dotnet build TsMap.sln -c Release
 
     - name: Upload Executable
-      uses: actions/upload-artifact@v4 # 编译完成后，把生成的 exe 打包发给你
+      uses: actions/upload-artifact@v4
       with:
         name: TsMap-Online-Built
         path: "**/bin/Release/**"
