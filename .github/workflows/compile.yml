@@ -25,34 +25,22 @@ jobs:
       run: nuget install Newtonsoft.Json -Version 13.0.3 -OutputDirectory packages
 
     - name: Robust XML Injections via Native DotNet API
-      # We use pure, native .NET XML classes inside PowerShell.
-      # This bypasses the shell's loose type conversion array bugs and guarantees a perfect XML write.
       shell: powershell
       run: |
         $projects = @("TsMap/TsMap.csproj", "TsMap.Canvas/TsMap.Canvas.csproj")
         foreach ($path in $projects) {
             $doc = New-Object System.Xml.XmlDocument
             $doc.Load($path)
-            
-            # Find the root Namespace Manager to prevent legacy node insertion exceptions
             $nsmgr = New-Object System.Xml.XmlNamespaceManager($doc.NameTable)
             $nsmgr.AddNamespace("ns", $doc.DocumentElement.NamespaceURI)
-            
-            # Locate an appropriate ItemGroup block
             $itemGroup = $doc.SelectSingleNode("//ns:ItemGroup", $nsmgr)
-            
-            # Construct a clean legacy Reference element node
             $reference = $doc.CreateElement("Reference", $doc.DocumentElement.NamespaceURI)
             $reference.SetAttribute("Include", "Newtonsoft.Json")
-            
             $hintPath = $doc.CreateElement("HintPath", $doc.DocumentElement.NamespaceURI)
             $hintPath.InnerText = "..\packages\Newtonsoft.Json.13.0.3\lib\net45\Newtonsoft.Json.dll"
-            
             [void]$reference.AppendChild($hintPath)
             [void]$itemGroup.AppendChild($reference)
-            
             $doc.Save($path)
-            Write-Host "Successfully patched: $path"
         }
 
     - name: Restore Solution Assets
@@ -61,15 +49,20 @@ jobs:
     - name: Build with Visual Studio MSBuild
       run: msbuild TsMap.sln /v:m
 
-    - name: Scan Generated Files
+    - name: Gather Final Executables
+      # 【全盘无死角强捞】：
+      # 抛弃脆弱的通配符路径匹配。我们直接在顶层创建一个全新的 `FinalOutput` 文件夹，
+      # 然后用 PowerShell 强行把整个工作区里所有刚刚编译出来的所有 .exe / .dll 实体文件全部硬复制进来！
       shell: powershell
       run: |
-        Get-ChildItem -Path . -Filter *.exe -Recurse | Select-Object FullName
+        New-Item -ItemType Directory -Force -Path .\FinalOutput
+        Get-ChildItem -Path . -Include *.exe, *.dll -Recurse | Where-Object { $_.FullName -notmatch "packages" } | Copy-Item -Destination .\FinalOutput -Force
+        Write-Host "--- 以下是成功强捞到的最终文件列表 ---"
+        Get-ChildItem -Path .\FinalOutput
 
-    - name: Gather Final Executables
+    - name: Upload Artifacts From Safe Zone
       uses: actions/upload-artifact@v4
       with:
         name: TsMap-Hotfixed-Binaries
-        path: |
-          **/*.exe
-          **/*.dll
+        # 【核心破局】：直接无条件打包这个百分之百有货的 `FinalOutput` 专属安全文件夹
+        path: .\FinalOutput\
