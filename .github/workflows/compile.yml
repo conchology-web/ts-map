@@ -1,6 +1,6 @@
 name: Ultimate Hotfix Compile TsMap
 on:
-  workflow_dispatch: 
+  workflow_dispatch:
 
 jobs:
   build:
@@ -8,19 +8,21 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-      
+
     - name: Setup .NET
       uses: microsoft/setup-msbuild@v2
 
     - name: Setup NuGet
       uses: nuget/setup-nuget@v1
 
+    # 如果需要移除 PostBuildEvent 等，保留
     - name: Frontal Strike - Remove Rigid Configurations
       run: |
         powershell -Command "(Get-Content TsMap.Canvas/TsMap.Canvas.csproj) -replace '<PostBuildEvent>.*?</PostBuildEvent>', '' | Set-Content TsMap.Canvas/TsMap.Canvas.csproj"
         powershell -Command "(Get-Content TsMap/TsMap.csproj) -replace '<TreatWarningsAsErrors>true</TreatWarningsAsErrors>', '<TreatWarningsAsErrors>false</TreatWarningsAsErrors>' | Set-Content TsMap/TsMap.csproj"
         powershell -Command "(Get-Content TsMap.Canvas/TsMap.Canvas.csproj) -replace '<TreatWarningsAsErrors>true</TreatWarningsAsErrors>', '<TreatWarningsAsErrors>false</TreatWarningsAsErrors>' | Set-Content TsMap.Canvas/TsMap.Canvas.csproj"
 
+    # 如果项目确实需要 Newtonsoft.Json，并且没有 PackageReference，则保留注入；否则可删除
     - name: Install Newtonsoft.Json Package
       run: nuget install Newtonsoft.Json -Version 13.0.3 -OutputDirectory packages
 
@@ -34,35 +36,35 @@ jobs:
             $nsmgr = New-Object System.Xml.XmlNamespaceManager($doc.NameTable)
             $nsmgr.AddNamespace("ns", $doc.DocumentElement.NamespaceURI)
             $itemGroup = $doc.SelectSingleNode("//ns:ItemGroup", $nsmgr)
-            $reference = $doc.CreateElement("Reference", $doc.DocumentElement.NamespaceURI)
-            $reference.SetAttribute("Include", "Newtonsoft.Json")
-            $hintPath = $doc.CreateElement("HintPath", $doc.DocumentElement.NamespaceURI)
-            $hintPath.InnerText = "..\packages\Newtonsoft.Json.13.0.3\lib\net45\Newtonsoft.Json.dll"
-            [void]$reference.AppendChild($hintPath)
-            [void]$itemGroup.AppendChild($reference)
-            $doc.Save($path)
+            # 检查是否已存在该引用，避免重复
+            $existing = $doc.SelectSingleNode("//ns:Reference[@Include='Newtonsoft.Json']", $nsmgr)
+            if (-not $existing) {
+                $reference = $doc.CreateElement("Reference", $doc.DocumentElement.NamespaceURI)
+                $reference.SetAttribute("Include", "Newtonsoft.Json")
+                $hintPath = $doc.CreateElement("HintPath", $doc.DocumentElement.NamespaceURI)
+                $hintPath.InnerText = "..\packages\Newtonsoft.Json.13.0.3\lib\net45\Newtonsoft.Json.dll"
+                [void]$reference.AppendChild($hintPath)
+                [void]$itemGroup.AppendChild($reference)
+                $doc.Save($path)
+                Write-Host "Successfully patched: $path"
+            } else {
+                Write-Host "Reference already exists in: $path"
+            }
         }
 
     - name: Restore Solution Assets
       run: nuget restore TsMap.sln
-      
+
     - name: Build with Visual Studio MSBuild
-      run: msbuild TsMap.sln /v:m
+      run: msbuild TsMap.sln /v:m /p:Configuration=Release /p:OutDir="${{ github.workspace }}\build_output\"
+
+    # 调试：列出所有生成文件（可删除）
+    - name: List built binaries
+      shell: powershell
+      run: Get-ChildItem -Path build_output -Recurse
 
     - name: Gather Final Executables
-      # 【全盘无死角强捞】：
-      # 抛弃脆弱的通配符路径匹配。我们直接在顶层创建一个全新的 `FinalOutput` 文件夹，
-      # 然后用 PowerShell 强行把整个工作区里所有刚刚编译出来的所有 .exe / .dll 实体文件全部硬复制进来！
-      shell: powershell
-      run: |
-        New-Item -ItemType Directory -Force -Path .\FinalOutput
-        Get-ChildItem -Path . -Include *.exe, *.dll -Recurse | Where-Object { $_.FullName -notmatch "packages" } | Copy-Item -Destination .\FinalOutput -Force
-        Write-Host "--- 以下是成功强捞到的最终文件列表 ---"
-        Get-ChildItem -Path .\FinalOutput
-
-    - name: Upload Artifacts From Safe Zone
       uses: actions/upload-artifact@v4
       with:
         name: TsMap-Hotfixed-Binaries
-        # 【核心破局】：直接无条件打包这个百分之百有货的 `FinalOutput` 专属安全文件夹
-        path: .\FinalOutput\
+        path: build_output\**\*   # 上传整个输出目录，包含所有 exe/dll/pdb 等
