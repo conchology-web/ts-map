@@ -1,45 +1,56 @@
-name: Ultimate Hotfix Compile TsMap
+name: Legacy Framework Compile TsMap
 on:
   workflow_dispatch: 
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-latest # 提供全套的旧版 MSBuild 和 Visual Studio 2022 编译环境
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
       
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: '8.0.x'
-
-    - name: Frontal Strike - Remove Broken PostBuildEvents
-      # 【核心正面解决】：
-      # 1. 强行删除原作者在项目文件里写死的硬编码复制 `libdeflate.dll` 的阻断事件
-      # 2. 强行关闭 TreatWarningsAsErrors 安全策略
-      run: |
-        powershell -Command "(Get-Content TsMap.Canvas/TsMap.Canvas.csproj) -replace '<PostBuildEvent>.*?</PostBuildEvent>', '' | Set-Content TsMap.Canvas/TsMap.Canvas.csproj"
-        powershell -Command "(Get-Content TsMap/TsMap.csproj) -replace '<TreatWarningsAsErrors>true</TreatWarningsAsErrors>', '<TreatWarningsAsErrors>false</TreatWarningsAsErrors>' | Set-Content TsMap/TsMap.csproj"
-        powershell -Command "(Get-Content TsMap.Canvas/TsMap.Canvas.csproj) -replace '<TreatWarningsAsErrors>true</TreatWarningsAsErrors>', '<TreatWarningsAsErrors>false</TreatWarningsAsErrors>' | Set-Content TsMap.Canvas/TsMap.Canvas.csproj"
-
-    - name: Inject Newtonsoft.Json
-      run: |
-        dotnet add TsMap/TsMap.csproj package Newtonsoft.Json
-        dotnet add TsMap.Canvas/TsMap.Canvas.csproj package Newtonsoft.Json
-        
-    - name: Restore Project
-      run: dotnet restore TsMap.sln
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
       
-    - name: Build and Output
-      # 即使 C++ 库复制失败，只要 C# 主体生成完毕，我们强行让虚拟机不因这个报错而中断
-      run: |
-        dotnet build TsMap.sln -c Release || echo "Build core finished, continuing to gather artifacts."
+    - name: Setup NuGet
+      uses: nuget/setup-nuget@v1
 
-    - name: Gather Final Executables
+    - name: Legacy Hotfix - Inject Newtonsoft.Json and Disable Strict Warnings
+      # 【正面破局】：
+      # 我们完全放弃 dotnet add 命令。
+      # 直接使用 PowerShell 将老旧的 <Reference> XML 节点强行写进两个项目的 .csproj 文件中。
+      # 同时干掉会导致现代编译器报错中止的 TreatWarningsAsErrors 和 PostBuildEvent。
+      run: |
+        $JsonXml = '<Reference Include="Newtonsoft.Json"><HintPath>..\packages\Newtonsoft.Json.13.0.3\lib\net45\Newtonsoft.Json.dll</HintPath></Reference>'
+        
+        # 往核心 TsMap 项目注入 Newtonsoft.Json 引用
+        (Get-Content TsMap/TsMap.csproj) -replace '<ItemGroup>', "<ItemGroup>`n    $JsonXml" | Set-Content TsMap/TsMap.csproj
+        # 往 UI Canvas 项目注入 Newtonsoft.Json 引用
+        (Get-Content TsMap.Canvas/TsMap.Canvas.csproj) -replace '<ItemGroup>', "<ItemGroup>`n    $JsonXml" | Set-Content TsMap.Canvas/TsMap.Canvas.csproj
+        
+        # 关闭严格的警告转错误策略（防止现代编译器对老代码吹毛求疵）
+        (Get-Content TsMap/TsMap.csproj) -replace '<TreatWarningsAsErrors>true</TreatWarningsAsErrors>', '<TreatWarningsAsErrors>false</TreatWarningsAsErrors>' | Set-Content TsMap/TsMap.csproj
+        (Get-Content TsMap.Canvas/TsMap.Canvas.csproj) -replace '<TreatWarningsAsErrors>true</TreatWarningsAsErrors>', '<TreatWarningsAsErrors>false</TreatWarningsAsErrors>' | Set-Content TsMap.Canvas/TsMap.Canvas.csproj
+        
+        # 强行删除原作者在项目文件里写死的、会导致绝对路径报错的复制 C++ 库事件
+        (Get-Content TsMap.Canvas/TsMap.Canvas.csproj) -replace '<PostBuildEvent>.*?</PostBuildEvent>', '' | Set-Content TsMap.Canvas/TsMap.Canvas.csproj
+
+    - name: Install Newtonsoft.Json Package
+      # 使用正统的旧版 nuget 命令，下载包并解压到本地的 packages 文件夹中
+      run: nuget install Newtonsoft.Json -Version 13.0.3 -OutputDirectory packages
+        
+    - name: Legacy Nuget Restore
+      # 为整个旧解决方案执行依赖补全
+      run: nuget restore TsMap.sln
+      
+    - name: Build with Visual Studio MSBuild
+      # 调用真正的 Visual Studio 编译器后端（MSBuild）强行编译为 Release 版本
+      run: msbuild TsMap.sln /p:Configuration=Release /p:Platform="Any CPU" /v:m
+
+    - name: Upload Compiled Binaries
       uses: actions/upload-artifact@v4
       with:
-        name: TsMap-Hotfixed-Binaries
+        name: TsMap-Legacy-Success-Binaries
         path: |
           **/bin/Release/
           **/bin/x64/Release/
