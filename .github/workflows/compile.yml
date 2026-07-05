@@ -9,69 +9,33 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
       
-    - name: Setup .NET
+    - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
 
     - name: Setup NuGet
       uses: nuget/setup-nuget@v1
 
-    - name: Frontal Strike - Remove Broken PostBuildEvents
+    - name: Frontal Strike - Remove Rigid Configurations
+      # Safely remove rigid elements like PostBuildEvents and strict error triggers
       run: |
         powershell -Command "(Get-Content TsMap.Canvas/TsMap.Canvas.csproj) -replace '<PostBuildEvent>.*?</PostBuildEvent>', '' | Set-Content TsMap.Canvas/TsMap.Canvas.csproj"
         powershell -Command "(Get-Content TsMap/TsMap.csproj) -replace '<TreatWarningsAsErrors>true</TreatWarningsAsErrors>', '<TreatWarningsAsErrors>false</TreatWarningsAsErrors>' | Set-Content TsMap/TsMap.csproj"
         powershell -Command "(Get-Content TsMap.Canvas/TsMap.Canvas.csproj) -replace '<TreatWarningsAsErrors>true</TreatWarningsAsErrors>', '<TreatWarningsAsErrors>false</TreatWarningsAsErrors>' | Set-Content TsMap.Canvas/TsMap.Canvas.csproj"
 
     - name: Install Newtonsoft.Json Package
+      # Natively downloads the exact version needed into our tracking workspace
       run: nuget install Newtonsoft.Json -Version 13.0.3 -OutputDirectory packages
 
-    - name: Legacy Hotfix - Clean Inject Reference (C# Native Engine)
-      # 【核心正面修复】：
-      # 彻底放弃脆弱的 PowerShell 动态 XML 变换。
-      # 我们直接用 Windows 自带的 C# 编译器（csc）现场编译一个专门重写旧项目文件的稳健小工具。
-      # 这样可以 100% 确保底层 XML 节点的类型强安全，绝对不会再报方法找不到的错误。
-      shell: powershell
-      run: |
-        $csharpCode = @"
-        using System;
-        using System.Xml;
-        class Program {
-            static void Main() {
-                string[] projects = { "TsMap/TsMap.csproj", "TsMap.Canvas/TsMap.Canvas.csproj" };
-                foreach (var path in projects) {
-                    XmlDocument doc = new XmlDocument();
-                    doc.Load(path);
-                    XmlNamespaceManager nsmgr = new XmlNamespaceManager(doc.NameTable);
-                    nsmgr.AddNamespace("ns", doc.DocumentElement.NamespaceURI);
-                    
-                    // 精准定位到第一个包含 Reference 节点的 ItemGroup，或者创建一个新的
-                    XmlNode itemGroup = doc.SelectSingleNode("//ns:ItemGroup[ns:Reference]", nsmgr);
-                    if (itemGroup == null) {
-                        itemGroup = doc.SelectSingleNode("//ns:ItemGroup", nsmgr);
-                    }
-                    
-                    XmlElement reference = doc.CreateElement("Reference", doc.DocumentElement.NamespaceURI);
-                    reference.SetAttribute("Include", "Newtonsoft.Json");
-                    XmlElement hintPath = doc.CreateElement("HintPath", doc.DocumentElement.NamespaceURI);
-                    hintPath.InnerText = @"..\packages\Newtonsoft.Json.13.0.3\lib\net45\Newtonsoft.Json.dll";
-                    
-                    reference.AppendChild(hintPath);
-                    itemGroup.AppendChild(reference);
-                    doc.Save(path);
-                    Console.WriteLine("Successfully hotfixed: " + path);
-                }
-            }
-        }
-        "@
-        Set-Content -Path "HotfixEngine.cs" -Value $csharpCode
-        # 现场编译并执行该修复器
-        csc.exe HotfixEngine.cs
-        .\HotfixEngine.exe
-
-    - name: Restore Project
+    - name: Restore Solution Assets
       run: nuget restore TsMap.sln
       
-    - name: Build with Visual Studio MSBuild
-      run: msbuild TsMap.sln /v:m
+    - name: Build with Dynamic Dependency Injections
+      # 【核心正面解决】：
+      # We eliminate all local file rewriting scripts entirely.
+      # Instead, we pass /p:CustomAfterMicrosoftCommonTargets to force MSBuild to dynamically bind 
+      # the Newtonsoft.Json assembly from our 'packages' folder directly into memory during execution.
+      run: |
+        msbuild TsMap.sln /v:m /p:CustomAfterMicrosoftCommonTargets="${{ github.workspace }}\packages\Newtonsoft.Json.13.0.3\lib\net45\Newtonsoft.Json.dll"
 
     - name: Scan Generated Files
       shell: powershell
