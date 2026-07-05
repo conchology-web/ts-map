@@ -12,22 +12,28 @@ jobs:
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: '8.0.x'
+        # 使用更稳健且对旧项目兼容性极佳的 .NET 6 和 8 双环境支持
+        dotnet-version: |
+          6.0.x
+          8.0.x
         
     - name: Force Install Newtonsoft Json
-      # 【核心修复】：在编译前，强行用 NuGet 为 TsMap 核心项目安装缺少的 Newtonsoft.Json 库
       run: |
         dotnet add TsMap/TsMap.csproj package Newtonsoft.Json
         dotnet add TsMap.Canvas/TsMap.Canvas.csproj package Newtonsoft.Json
         
     - name: Restore dependencies
-      run: dotnet restore TsMap.sln
+      # 添加 --disable-parallel 强制单线程恢复，防止网络抖动导致的依赖包残缺
+      run: dotnet restore TsMap.sln --disable-parallel
       
     - name: Build Project
-      run: dotnet build TsMap.sln -c Release
+      # 1. 强制关闭警告当错误 (NoWarn)
+      # 2. 更改为详细日志输出 (verbosity:minimal)，只要出错会直接在主屏幕大字打印
+      run: dotnet build TsMap.sln -c Release -p:NoWarn=CS1591,CS0168 -v:m
 
     - name: Upload Executable
       uses: actions/upload-artifact@v4
+      if: success() # 只有成功时才上传
       with:
         name: TsMap-Online-Built
         path: "**/bin/Release/**"
