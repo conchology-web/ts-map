@@ -16,27 +16,21 @@ jobs:
       uses: nuget/setup-nuget@v1
 
     - name: Frontal Strike - Remove Broken PostBuildEvents
-      # 1. 移除会导致绝对路径报错的复制事件
-      # 2. 将警告强制拦截关闭
       run: |
         powershell -Command "(Get-Content TsMap.Canvas/TsMap.Canvas.csproj) -replace '<PostBuildEvent>.*?</PostBuildEvent>', '' | Set-Content TsMap.Canvas/TsMap.Canvas.csproj"
         powershell -Command "(Get-Content TsMap/TsMap.csproj) -replace '<TreatWarningsAsErrors>true</TreatWarningsAsErrors>', '<TreatWarningsAsErrors>false</TreatWarningsAsErrors>' | Set-Content TsMap/TsMap.csproj"
         powershell -Command "(Get-Content TsMap.Canvas/TsMap.Canvas.csproj) -replace '<TreatWarningsAsErrors>true</TreatWarningsAsErrors>', '<TreatWarningsAsErrors>false</TreatWarningsAsErrors>' | Set-Content TsMap.Canvas/TsMap.Canvas.csproj"
 
     - name: Install Newtonsoft.Json Package
-      # 正统 nuget 工具拉取依赖包，这步在你的日志里显示已经是 100% 成功的
       run: nuget install Newtonsoft.Json -Version 13.0.3 -OutputDirectory packages
 
     - name: Legacy Hotfix - Clean Inject Reference
-      # 【核心正面修复】：
-      # 彻底放弃容易引发终端符号冲突的 -replace 命令。
-      # 我们直接用最稳健的 [xml] 对象解析方式，在内存中动态为旧工程文件挂载标准的 Newtonsoft.Json 节点。
       shell: powershell
       run: |
         $projects = @("TsMap/TsMap.csproj", "TsMap.Canvas/TsMap.Canvas.csproj")
         foreach ($path in $projects) {
             [xml]$xml = Get-Content $path
-            $itemGroup = $xml.Project.ItemGroup[0]
+            $itemGroup = $xml.Project.ItemGroup
             $reference = $xml.CreateElement("Reference", $xml.Project.NamespaceURI)
             $reference.SetAttribute("Include", "Newtonsoft.Json")
             $hintPath = $xml.CreateElement("HintPath", $xml.Project.NamespaceURI)
@@ -53,8 +47,10 @@ jobs:
       run: msbuild TsMap.sln /v:m
 
     - name: Scan Generated Files
+      # 【核心正面修复】：使用标准的 PowerShell 命令来遍历并打印生成的 .exe 文件，绝对不会再报路径找不到的错误
+      shell: powershell
       run: |
-        dir /s *.exe
+        Get-ChildItem -Path . -Filter *.exe -Recurse | Select-Object FullName
 
     - name: Gather Final Executables
       uses: actions/upload-artifact@v4
