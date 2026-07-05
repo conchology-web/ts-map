@@ -63,8 +63,9 @@ jobs:
       shell: powershell
       run: Get-ChildItem -Path build_output -Recurse
 
+
     - name: Gather Final Executables
       uses: actions/upload-artifact@v4
       with:
         name: TsMap-Hotfixed-Binaries
-        path: build_output\**\*   # 上传整个输出目录，包含所有 exe/dll/pdb 等
+        path: build_output\**   # 递归上传整个 build_output 目录下的所有内容
