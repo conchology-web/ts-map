@@ -1,39 +1,42 @@
-name: Online VS Compile TsMap
+name: Real VS MSBuild Compile TsMap
 on:
   workflow_dispatch: 
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-latest # 租用微软官方最新的 Windows 虚拟机
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
       
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        # 使用更稳健且对旧项目兼容性极佳的 .NET 6 和 8 双环境支持
-        dotnet-version: |
-          6.0.x
-          8.0.x
+    - name: Setup MSBuild
+      # 【核心修复 1】：强行在云端配置真正的 Visual Studio 编译环境（MSBuild），而不是轻量 SDK
+      uses: microsoft/setup-msbuild@v2
+      
+    - name: Setup NuGet
+      # 【核心修复 2】：配置老旧 C# 项目最需要的 NuGet 包管理器环境
+      uses: nuget/setup-nuget@v1
         
     - name: Force Install Newtonsoft Json
+      # 通过 NuGet 强行往两个子项目中注入 Newtonsoft.Json 依赖并修复引用路径
       run: |
+        nuget install Newtonsoft.Json -Version 13.0.3 -OutputDirectory packages
         dotnet add TsMap/TsMap.csproj package Newtonsoft.Json
         dotnet add TsMap.Canvas/TsMap.Canvas.csproj package Newtonsoft.Json
         
-    - name: Restore dependencies
-      # 添加 --disable-parallel 强制单线程恢复，防止网络抖动导致的依赖包残缺
-      run: dotnet restore TsMap.sln --disable-parallel
+    - name: Restore NuGet Packages
+      # 使用 VS 专属的恢复命令，彻底解决项目文件（.csproj）古老导致的依赖残缺
+      run: nuget restore TsMap.sln
       
-    - name: Build Project
-      # 1. 强制关闭警告当错误 (NoWarn)
-      # 2. 更改为详细日志输出 (verbosity:minimal)，只要出错会直接在主屏幕大字打印
-      run: dotnet build TsMap.sln -c Release -p:NoWarn=CS1591,CS0168 -v:m
+    - name: Build with Real Visual Studio
+      # 使用真正的 Visual Studio 编译器（MSBuild）编译整个项目，并跳过老旧警告
+      run: msbuild TsMap.sln /p:Configuration=Release /p:Platform="Any CPU" /p:WarningLevel=0
 
     - name: Upload Executable
       uses: actions/upload-artifact@v4
-      if: success() # 只有成功时才上传
+      if: always() # 无论成功失败都把 bin 目录打包，方便我们直接看编译出来的文件
       with:
-        name: TsMap-Online-Built
-        path: "**/bin/Release/**"
+        name: TsMap-VS-Built-Output
+        path: |
+          **/bin/Release/**
+          **/bin/x64/Release/**
